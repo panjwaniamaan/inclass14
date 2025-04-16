@@ -1,106 +1,205 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'firebase_options.dart';
+import 'models/question.dart';
+import 'services/api_service.dart';
 
-Future<void> _messageHandler(RemoteMessage message) async {
-  print('Background message: ${message.notification?.body}');
+void main() {
+  runApp(MyApp());
 }
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  FirebaseMessaging.onBackgroundMessage(_messageHandler);
-  runApp(MessagingTutorial());
-}
-
-class MessagingTutorial extends StatelessWidget {
+class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Firebase Messaging',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(title: 'Firebase Messaging'),
+      title: 'ACT 15 MAD',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: MainMenuScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  final String? title;
-
-  MyHomePage({Key? key, this.title}) : super(key: key);
-
+class MainMenuScreen extends StatelessWidget {
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('ACT 15 MAD')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Quiz',
+              style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => QuizScreen()),
+                );
+              },
+              child: Text('Start Quiz'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  late FirebaseMessaging messaging;
-  String? notificationText;
+class QuizScreen extends StatefulWidget {
+  @override
+  _QuizScreenState createState() => _QuizScreenState();
+}
+
+class _QuizScreenState extends State<QuizScreen> {
+  List<Question> _questions = [];
+  int _currentQuestionIndex = 0;
+  int _score = 0;
+  bool _loading = true;
+  bool _answered = false;
+  String _selectedAnswer = "";
+  String _feedbackText = "";
 
   @override
   void initState() {
     super.initState();
+    _loadQuestions();
+  }
 
-    messaging = FirebaseMessaging.instance;
+  Future<void> _loadQuestions() async {
+    try {
+      final questions = await ApiService.fetchQuestions();
+      setState(() {
+        _questions = questions;
+        _loading = false;
+      });
+    } catch (e) {
+      print(e);
+    }
+  }
 
-    messaging.getToken().then((token) {
-      print("FCM Token: $token");
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text("FCM Token printed to console."),
-      ));
+  void _submitAnswer(String selectedAnswer) {
+    setState(() {
+      _answered = true;
+      _selectedAnswer = selectedAnswer;
+
+      final correctAnswer = _questions[_currentQuestionIndex].correctAnswer;
+      if (selectedAnswer == correctAnswer) {
+        _score++;
+        _feedbackText = "Correct! The answer is $correctAnswer.";
+      } else {
+        _feedbackText = "Incorrect. The correct answer is $correctAnswer.";
+      }
     });
+  }
 
-    messaging.subscribeToTopic("messaging");
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print("Message received in foreground");
-      print("Title: ${message.notification?.title}");
-      print("Body: ${message.notification?.body}");
-      print("Data: ${message.data}");
-
-      String type = message.data['type'] ?? 'regular';
-      String alertTitle = type == 'important'
-          ? "🚨 Important Alert"
-          : "📩 Regular Notification";
-
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: Text(alertTitle),
-            content: Text(message.notification?.body ?? 'No message'),
-            actions: [
-              TextButton(
-                child: Text("OK"),
-                onPressed: () => Navigator.of(context).pop(),
-              )
-            ],
-          );
-        },
+  void _nextQuestionOrResult() {
+    if (_currentQuestionIndex + 1 >= _questions.length) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ResultScreen(score: _score, total: _questions.length),
+        ),
       );
-    });
+    } else {
+      setState(() {
+        _answered = false;
+        _selectedAnswer = "";
+        _feedbackText = "";
+        _currentQuestionIndex++;
+      });
+    }
+  }
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print("User tapped on the notification");
-    });
+  Widget _buildOptionButton(String option) {
+    return ElevatedButton(
+      onPressed: _answered ? null : () => _submitAnswer(option),
+      child: Text(option),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final question = _questions[_currentQuestionIndex];
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title ?? 'FCM Demo'),
+      appBar: AppBar(title: Text('Quiz App')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Question ${_currentQuestionIndex + 1}/${_questions.length}',
+              style: TextStyle(fontSize: 20),
+            ),
+            SizedBox(height: 16),
+            Text(
+              question.question,
+              style: TextStyle(fontSize: 18),
+            ),
+            SizedBox(height: 16),
+            ...question.options.map((option) => _buildOptionButton(option)),
+            SizedBox(height: 20),
+            if (_answered)
+              Text(
+                _feedbackText,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: _selectedAnswer == question.correctAnswer
+                      ? Colors.green
+                      : Colors.red,
+                ),
+              ),
+            if (_answered)
+              ElevatedButton(
+                onPressed: _nextQuestionOrResult,
+                child: Text(_currentQuestionIndex + 1 >= _questions.length ? 'See Results' : 'Next Question'),
+              ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class ResultScreen extends StatelessWidget {
+  final int score;
+  final int total;
+
+  ResultScreen({required this.score, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Quiz Results')),
       body: Center(
-        child: Text(
-          "Waiting for notifications...",
-          style: TextStyle(fontSize: 18),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'You scored $score out of $total!',
+              style: TextStyle(fontSize: 24),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => MainMenuScreen()),
+                  (route) => false,
+                );
+              },
+              child: Text('Main Menu'),
+            )
+          ],
         ),
       ),
     );
